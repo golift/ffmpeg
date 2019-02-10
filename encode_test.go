@@ -2,6 +2,7 @@ package ffmpeg
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"testing"
 
@@ -76,4 +77,49 @@ func TestValues(t *testing.T) {
 	a.EqualValues(DefaultCaptureSize, c.Size)
 	a.EqualValues(DefaultProfile, c.Prof)
 	a.EqualValues(DefaultLevel, c.Level)
+}
+
+/* GoDoc Code Examples */
+
+// Example non-transcode direct-save from securityspy.
+func Example_securitySpy() {
+	securitypsy := "rtsp://user:pass@127.0.0.1:8000/++stream?cameraNum=1"
+	output := "/tmp/securitypsy_captured_file.mov"
+	config := &Config{
+		FFMPEG: "/usr/local/bin/ffmpeg",
+		Copy:   true, // do not transcode
+		Audio:  true, // retain audio stream
+		Time:   10,   // 10 seconds
+	}
+	encode := Get(config)
+	cmd, out, err := encode.SaveVideo(securitypsy, output, "SecuritySpyVideoTitle")
+	log.Println("Command Used:", cmd)
+	log.Println("Command Output:", out)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	log.Println("Saved file from", securitypsy, "to", output)
+}
+
+// Example transcode from a Dahua IP camera.
+func Example_dahua() {
+	dahua := "rtsp://admin:password@192.168.1.12/live"
+	output := "/tmp/dahua_captured_file.m4v"
+	encode := Get(&Config{
+		Audio:  true, // retain audio stream
+		Time:   10,   // 10 seconds
+		Width:  1920,
+		Height: 1080,
+		CRF:    23,
+		Level:  "4.0",
+		Rate:   5,
+		Prof:   "baseline", // or main or high
+	})
+	cmd, out, err := encode.SaveVideo(dahua, output, "DahuaVideoTitle")
+	log.Println("Command Used:", cmd)
+	log.Println("Command Output:", out)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	log.Println("Saved file from", dahua, "to", output)
 }
