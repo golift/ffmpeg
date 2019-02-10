@@ -14,7 +14,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Default, Maximum and Minimum Values. Change these if your needs differ.
+// Default, Maximum and Minimum Values for encoder configuration. Change these if your needs differ.
 var (
 	DefaultFrameRate   = 5
 	MinimumFrameRate   = 1
@@ -35,7 +35,7 @@ var (
 	DefaultLevel       = "3.0"
 )
 
-// Errors that this library outputs.
+// Custom errors that this library outputs. The library also outputs errors created elsewhere.
 var (
 	ErrorInvalidOutput = errors.New("output path is not valid")
 	ErrorInvalidInput  = errors.New("input path is not valid")
@@ -66,9 +66,7 @@ type Encoder struct {
 // Get an encoder interface.
 func Get(config *Config) *Encoder {
 	e := &Encoder{config: config}
-	if e.config == nil {
-		e.config = &Config{FFMPEG: DefaultFFmpegPath}
-	} else if e.config.FFMPEG == "" {
+	if e.config.FFMPEG == "" {
 		e.config.FFMPEG = DefaultFFmpegPath
 	}
 	e.SetLevel(e.config.Level)
@@ -155,10 +153,13 @@ func (e *Encoder) SetSize(size string) int64 {
 	return e.config.Size
 }
 
+// getVideoHandle is a helper function that creates and returns an ffmpeg command.
+// This is used by higher level function to cobble together an input stream.
 func (e *Encoder) getVideoHandle(input, output, title string) (string, *exec.Cmd) {
 	if title == "" {
 		title = filepath.Base(output)
 	}
+	// the order of these values is important.
 	arg := []string{
 		e.config.FFMPEG,
 		"-v", "16", // log level
@@ -193,13 +194,12 @@ func (e *Encoder) getVideoHandle(input, output, title string) (string, *exec.Cmd
 	} else {
 		arg = append(arg, "-c:a", "copy")
 	}
-	arg = append(arg, output)
-	cmd := exec.Command(arg[0], arg[1:]...)
-
-	return strings.Join(arg, " "), cmd
+	arg = append(arg, output) // save file path goes last.
+	return strings.Join(arg, " "), exec.Command(arg[0], arg[1:]...)
 }
 
 // GetVideo retreives video from an input and returns an io.ReadCloser to consume the output.
+// Input must be an RTSP URL. Title is encoded into the video as the "movie title."
 // Returns command used, io.ReadCloser and error or nil.
 func (e *Encoder) GetVideo(input, title string) (string, io.ReadCloser, error) {
 	if input == "" {
@@ -214,6 +214,7 @@ func (e *Encoder) GetVideo(input, title string) (string, io.ReadCloser, error) {
 }
 
 // SaveVideo saves a video snippet to a file.
+// Input must be an RTSP URL and output must be a file path. It will be overwritten.
 // Returns command used, command output and error or nil.
 func (e *Encoder) SaveVideo(input, output, title string) (string, string, error) {
 	if input == "" {
@@ -229,7 +230,7 @@ func (e *Encoder) SaveVideo(input, output, title string) (string, string, error)
 	if err := cmd.Start(); err != nil {
 		return cmdStr, "", err
 	}
-	err := cmd.Wait()
+	err := cmd.Wait() // must execute this before returning to populate out variable.
 	return cmdStr, strings.TrimSpace(out.String()), err
 }
 
