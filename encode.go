@@ -1,6 +1,7 @@
+// Package ffmpeg captures video from RTSP streams, like IP cameras.
+//
+// Provides a simple interface to set FFMPEG options and capture video from an RTSP source.
 package ffmpeg
-
-/* Encode videos from RTSP URLs using FFMPEG */
 
 import (
 	"bytes"
@@ -13,7 +14,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Default, Maximum and Minimum Values
+// Default, Maximum and Minimum Values. Change these if your needs differ.
 var (
 	DefaultFrameRate   = 5
 	MinimumFrameRate   = 1
@@ -32,11 +33,16 @@ var (
 	DefaultFFmpegPath  = "/usr/local/bin/ffmpeg"
 	DefaultProfile     = "main"
 	DefaultLevel       = "3.0"
+)
+
+// Errors that this library outputs.
+var (
 	ErrorInvalidOutput = errors.New("output path is not valid")
 	ErrorInvalidInput  = errors.New("input path is not valid")
 )
 
-// Config defines how to ffmpeg shall transcode a stream.
+// Config defines how ffmpeg shall transcode a stream.
+// If Copy is true, these options are ignored: profile, level, width, height, crf and frame rate.
 type Config struct {
 	FFMPEG string // "/usr/local/bin/ffmpeg"
 	Level  string // 3.0, 3.1 ..
@@ -77,12 +83,14 @@ func (e *Encoder) Config() Config {
 }
 
 // SetAudio turns audio on or off based on a string value.
+// This can also be passed into Get() as a boolean.
 func (e *Encoder) SetAudio(audio string) bool {
 	e.config.Audio, _ = strconv.ParseBool(audio)
 	return e.config.Audio
 }
 
 // SetLevel sets the h264 transcode level.
+// This can also be passed into Get().
 func (e *Encoder) SetLevel(level string) string {
 	if e.config.Level = level; level != "3.0" && level != "3.1" && level != "4.0" && level != "4.1" && level != "4.2" {
 		e.config.Level = DefaultLevel
@@ -91,6 +99,7 @@ func (e *Encoder) SetLevel(level string) string {
 }
 
 // SetProfile sets the h264 transcode profile.
+// This can also be passed into Get().
 func (e *Encoder) SetProfile(profile string) string {
 	if e.config.Prof = profile; e.config.Prof != "main" && e.config.Prof != "baseline" && e.config.Prof != "high" {
 		e.config.Prof = DefaultProfile
@@ -98,42 +107,48 @@ func (e *Encoder) SetProfile(profile string) string {
 	return e.config.Prof
 }
 
-// SetWidth sets the transcode frame width.
+// SetWidth sets the transcode frame width from a string.
+// This can also be passed into Get() as an int.
 func (e *Encoder) SetWidth(width string) int {
 	e.config.Width, _ = strconv.Atoi(width)
 	e.fixValues()
 	return e.config.Width
 }
 
-// SetHeight sets the transcode frame width.
+// SetHeight sets the transcode frame width from a string.
+// This can also be passed into Get() as an int.
 func (e *Encoder) SetHeight(height string) int {
 	e.config.Height, _ = strconv.Atoi(height)
 	e.fixValues()
 	return e.config.Height
 }
 
-// SetCRF sets the h264 transcode CRF value.
+// SetCRF sets the h264 transcode CRF value from a string.
+// This can also be passed into Get() as an int.
 func (e *Encoder) SetCRF(crf string) int {
 	e.config.CRF, _ = strconv.Atoi(crf)
 	e.fixValues()
 	return e.config.CRF
 }
 
-// SetTime sets the maximum transcode duration.
+// SetTime sets the maximum transcode duration from a string representing seconds.
+// This can also be passed into Get() as an int.
 func (e *Encoder) SetTime(seconds string) int {
 	e.config.Time, _ = strconv.Atoi(seconds)
 	e.fixValues()
 	return e.config.Time
 }
 
-// SetRate sets the transcode framerate.
+// SetRate sets the transcode framerate from a string.
+// This can also be passed into Get() as an int.
 func (e *Encoder) SetRate(rate string) int {
 	e.config.Rate, _ = strconv.Atoi(rate)
 	e.fixValues()
 	return e.config.Rate
 }
 
-// SetSize sets the maximum transcode file size.
+// SetSize sets the maximum transcode file size as a string.
+// This can also be passed into Get() as an int64.
 func (e *Encoder) SetSize(size string) int64 {
 	e.config.Size, _ = strconv.ParseInt(size, 10, 64)
 	e.fixValues()
@@ -184,9 +199,8 @@ func (e *Encoder) getVideoHandle(input, output, title string) (string, *exec.Cmd
 	return strings.Join(arg, " "), cmd
 }
 
-// GetVideo retreives video from an input and returns a Reader to consume the output.
-// The Reader contains output messages if output is a filepath.
-// The Reader contains the video if the output is "-"
+// GetVideo retreives video from an input and returns an io.ReadCloser to consume the output.
+// Returns command used, io.ReadCloser and error or nil.
 func (e *Encoder) GetVideo(input, title string) (string, io.ReadCloser, error) {
 	if input == "" {
 		return "", nil, ErrorInvalidInput
@@ -200,6 +214,7 @@ func (e *Encoder) GetVideo(input, title string) (string, io.ReadCloser, error) {
 }
 
 // SaveVideo saves a video snippet to a file.
+// Returns command used, command output and error or nil.
 func (e *Encoder) SaveVideo(input, output, title string) (string, string, error) {
 	if input == "" {
 		return "", "", ErrorInvalidInput
