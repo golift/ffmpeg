@@ -17,7 +17,7 @@ package main
 import (
 	"log"
 
-	"github.com/golift/ffmpeg"
+	"code.golift.io/ffmpeg"
 )
 
 func main() {
