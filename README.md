@@ -7,7 +7,7 @@ Provides a simple interface to set FFMPEG options and capture video from an RTSP
 Lots of other libraries out there do ffmpeg and rtsp things, but I couldn't find
 any that fit this simple task of "get a video snippet from a camera."
 
-- [GODOC](https://godoc.org/code.golift.io/ffmpeg)
+- [GODOC](https://godoc.org/golift.io/ffmpeg)
 
 ## Example
 
@@ -17,7 +17,7 @@ package main
 import (
 	"log"
 
-	"code.golift.io/ffmpeg"
+	"golift.io/ffmpeg"
 )
 
 func main() {
