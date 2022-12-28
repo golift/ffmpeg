@@ -15,4 +15,4 @@ linters:
     # unused
     - exhaustruct
 run:
-  timeout: 3m
+  timeout: 2m
