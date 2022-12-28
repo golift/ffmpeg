@@ -45,11 +45,11 @@ func TestSaveVideo(t *testing.T) {
 	t.Parallel()
 
 	assert := assert.New(t)
-	encode := Get(&Config{FFMPEG: "/bin/echo"})
+	encode := Get(&Config{FFMPEG: "echo"})
 	fileTemp := "/tmp/go-securityspy-encode-test-12345.txt"
 
 	cmd, out, err := encode.SaveVideo("INPUT", fileTemp, "TITLE")
-	assert.Nil(err, "/bin/echo returned an error. Something may be wrong with your environment.")
+	assert.Nil(err, "echo returned an error. Something may be wrong with your environment.")
 
 	// Make sure the produced command has all the expected values.
 	assert.Contains(cmd, "-an", "Audio may not be correctly disabled.")
@@ -65,16 +65,16 @@ func TestSaveVideo(t *testing.T) {
 		"Framesize is missing or malformed.")
 	assert.Contains(cmd, fmt.Sprintf("-r %d", DefaultFrameRate), "Frame Rate value is missing or malformed.")
 	assert.Contains(cmd, fmt.Sprintf("-fs %d", DefaultCaptureSize), "Size value is missing or malformed.")
-	assert.True(strings.HasPrefix(cmd, "/bin/echo"), "The command does not - but should - begin with the Encoder value.")
+	assert.True(strings.HasPrefix(cmd, "echo"), "The command does not - but should - begin with the Encoder value.")
 	assert.True(strings.HasSuffix(cmd, fileTemp),
 		"The command does not - but should - end with a dash to indicate output to stdout.")
-	assert.EqualValues(cmd, "/bin/echo "+out, "Somehow the wrong value was written")
+	assert.EqualValues(cmd, "echo "+out, "Somehow the wrong value was written")
 
 	// Make sure audio can be turned on.
-	encode = Get(&Config{FFMPEG: "/bin/echo", Audio: true})
+	encode = Get(&Config{FFMPEG: "echo", Audio: true})
 	cmd, _, err = encode.GetVideo("INPUT", "TITLE")
 
-	assert.Nil(err, "/bin/echo returned an error. Something may be wrong with your environment.")
+	assert.Nil(err, "echo returned an error. Something may be wrong with your environment.")
 	assert.Contains(cmd, "-c:a copy", "Audio may not be correctly enabled.")
 }
 
