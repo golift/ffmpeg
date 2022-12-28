@@ -14,6 +14,8 @@ import (
 )
 
 // Default, Maximum and Minimum Values for encoder configuration. Change these if your needs differ.
+//
+//nolint:gochecknoglobals
 var (
 	DefaultFrameRate   = 5
 	MinimumFrameRate   = 1
@@ -27,8 +29,8 @@ var (
 	MaximumEncodeCRF   = 30
 	DefaultCaptureTime = 15
 	MaximumCaptureTime = 1200             // 10 minute max.
-	DefaultCaptureSize = int64(2500000)   // 2.5MB default (roughly 5-10 seconds)
-	MaximumCaptureSize = int64(104857600) // 100MB max.
+	DefaultCaptureSize = int64(2500000)   //nolint:gomnd,nolintlint // 2.5MB default (roughly 5-10 seconds)
+	MaximumCaptureSize = int64(104857600) //nolint:gomnd,nolintlint // 100MB max.
 	DefaultFFmpegPath  = "/usr/local/bin/ffmpeg"
 	DefaultProfile     = "main"
 	DefaultLevel       = "3.0"
@@ -36,8 +38,8 @@ var (
 
 // Custom errors that this library outputs. The library also outputs errors created elsewhere.
 var (
-	ErrorInvalidOutput = fmt.Errorf("output path is not valid")
-	ErrorInvalidInput  = fmt.Errorf("input path is not valid")
+	ErrInvalidOutput = fmt.Errorf("output path is not valid")
+	ErrInvalidInput  = fmt.Errorf("input path is not valid")
 )
 
 // Config defines how ffmpeg shall transcode a stream.
@@ -64,16 +66,16 @@ type Encoder struct {
 
 // Get an encoder interface.
 func Get(config *Config) *Encoder {
-	e := &Encoder{config: config}
-	if e.config.FFMPEG == "" {
-		e.config.FFMPEG = DefaultFFmpegPath
+	encode := &Encoder{config: config}
+	if encode.config.FFMPEG == "" {
+		encode.config.FFMPEG = DefaultFFmpegPath
 	}
 
-	e.SetLevel(e.config.Level)
-	e.SetProfile(e.config.Prof)
-	e.fixValues()
+	encode.SetLevel(encode.config.Level)
+	encode.SetProfile(encode.config.Prof)
+	encode.fixValues()
 
-	return e
+	return encode
 }
 
 // Config returns the current values in the encoder.
@@ -162,7 +164,7 @@ func (e *Encoder) SetRate(rate string) int {
 // SetSize sets the maximum transcode file size as a string.
 // This can also be passed into Get() as an int64.
 func (e *Encoder) SetSize(size string) int64 {
-	e.config.Size, _ = strconv.ParseInt(size, 10, 64)
+	e.config.Size, _ = strconv.ParseInt(size, 10, 64) //nolint:gomnd,nolintlint
 
 	e.fixValues()
 
@@ -188,7 +190,7 @@ func (e *Encoder) getVideoHandle(input, output, title string) (string, *exec.Cmd
 	}
 
 	if e.config.Size > 0 {
-		arg = append(arg, "-fs", strconv.FormatInt(e.config.Size, 10))
+		arg = append(arg, "-fs", strconv.FormatInt(e.config.Size, 10)) //nolint:gomnd,nolintlint
 	}
 
 	if e.config.Time > 0 {
@@ -218,7 +220,7 @@ func (e *Encoder) getVideoHandle(input, output, title string) (string, *exec.Cmd
 
 	arg = append(arg, output) // save file path goes last.
 
-	return strings.Join(arg, " "), exec.Command(arg[0], arg[1:]...)
+	return strings.Join(arg, " "), exec.Command(arg[0], arg[1:]...) //nolint:Gosec
 }
 
 // GetVideo retreives video from an input and returns an io.ReadCloser to consume the output.
@@ -226,7 +228,7 @@ func (e *Encoder) getVideoHandle(input, output, title string) (string, *exec.Cmd
 // Returns command used, io.ReadCloser and error or nil.
 func (e *Encoder) GetVideo(input, title string) (string, io.ReadCloser, error) {
 	if input == "" {
-		return "", nil, ErrorInvalidInput
+		return "", nil, ErrInvalidInput
 	}
 
 	cmdStr, cmd := e.getVideoHandle(input, "-", title)
@@ -236,7 +238,11 @@ func (e *Encoder) GetVideo(input, title string) (string, io.ReadCloser, error) {
 		return cmdStr, nil, fmt.Errorf("subcommand failed: %w", err)
 	}
 
-	return cmdStr, stdoutpipe, cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return cmdStr, stdoutpipe, fmt.Errorf("run failed: %w", err)
+	}
+
+	return cmdStr, stdoutpipe, nil
 }
 
 // SaveVideo saves a video snippet to a file.
@@ -244,9 +250,9 @@ func (e *Encoder) GetVideo(input, title string) (string, io.ReadCloser, error) {
 // Returns command used, command output and error or nil.
 func (e *Encoder) SaveVideo(input, output, title string) (string, string, error) {
 	if input == "" {
-		return "", "", ErrorInvalidInput
+		return "", "", ErrInvalidInput
 	} else if output == "" || output == "-" {
-		return "", "", ErrorInvalidOutput
+		return "", "", ErrInvalidOutput
 	}
 
 	cmdStr, cmd := e.getVideoHandle(input, output, title)
@@ -265,7 +271,7 @@ func (e *Encoder) SaveVideo(input, output, title string) (string, string, error)
 }
 
 // fixValues makes sure video request values are sane.
-func (e *Encoder) fixValues() {
+func (e *Encoder) fixValues() { //nolint:cyclop
 	switch {
 	case e.config.Height == 0:
 		e.config.Height = DefaultFrameHeight
