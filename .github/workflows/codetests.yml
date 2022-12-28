@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 jobs:
-  Runs `go test` against 3 operating systems.
+  # Runs `go test` against 3 operating systems.
   gotest:
     strategy:
       matrix:
