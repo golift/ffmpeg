@@ -5,12 +5,14 @@ package ffmpeg
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Default, Maximum and Minimum Values for encoder configuration. Change these if your needs differ.
@@ -173,7 +175,7 @@ func (e *Encoder) SetSize(size string) int64 {
 
 // getVideoHandle is a helper function that creates and returns an ffmpeg command.
 // This is used by higher level function to cobble together an input stream.
-func (e *Encoder) getVideoHandle(input, output, title string) (string, *exec.Cmd) {
+func (e *Encoder) getVideoHandle(ctx context.Context, input, output, title string) (string, *exec.Cmd) {
 	if title == "" {
 		title = filepath.Base(output)
 	}
@@ -220,18 +222,37 @@ func (e *Encoder) getVideoHandle(input, output, title string) (string, *exec.Cmd
 
 	arg = append(arg, output) // save file path goes last.
 
-	return strings.Join(arg, " "), exec.Command(arg[0], arg[1:]...) //nolint:Gosec
+	return strings.Join(arg, " "), exec.CommandContext(ctx, arg[0], arg[1:]...) //nolint:Gosec
 }
 
 // GetVideo retreives video from an input and returns an io.ReadCloser to consume the output.
 // Input must be an RTSP URL. Title is encoded into the video as the "movie title."
 // Returns command used, io.ReadCloser and error or nil.
+// This will automatically create a context with a timeout equal to the time duration requested plus 1 second.
+// If no time duration is requested the context has no timeout.
+// If you want to control the context, use GetVideoContext().
 func (e *Encoder) GetVideo(input, title string) (string, io.ReadCloser, error) {
+	ctx := context.Background()
+
+	if e.config.Time > 0 {
+		var cancel func()
+		ctx, cancel = context.WithTimeout(ctx, time.Second*time.Duration(e.config.Time+1))
+		defer cancel()
+	}
+
+	return e.GetVideoContext(ctx, input, title)
+}
+
+// GetVideoContext retreives video from an input and returns an io.ReadCloser to consume the output.
+// Input must be an RTSP URL. Title is encoded into the video as the "movie title."
+// Returns command used, io.ReadCloser and error or nil.
+// Use the context to add a timeout value (max run duration) to the ffmpeg command.
+func (e *Encoder) GetVideoContext(ctx context.Context, input, title string) (string, io.ReadCloser, error) {
 	if input == "" {
 		return "", nil, ErrInvalidInput
 	}
 
-	cmdStr, cmd := e.getVideoHandle(input, "-", title)
+	cmdStr, cmd := e.getVideoHandle(ctx, input, "-", title)
 
 	stdoutpipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -248,14 +269,33 @@ func (e *Encoder) GetVideo(input, title string) (string, io.ReadCloser, error) {
 // SaveVideo saves a video snippet to a file.
 // Input must be an RTSP URL and output must be a file path. It will be overwritten.
 // Returns command used, command output and error or nil.
+// This will automatically create a context with a timeout equal to the time duration requested plus 1 second.
+// If no time duration is requested the context has no timeout.
+// If you want to control the context, use SaveVideoContext().
 func (e *Encoder) SaveVideo(input, output, title string) (string, string, error) {
+	ctx := context.Background()
+
+	if e.config.Time > 0 {
+		var cancel func()
+		ctx, cancel = context.WithTimeout(ctx, time.Second*time.Duration(e.config.Time+1))
+		defer cancel()
+	}
+
+	return e.SaveVideoContext(ctx, input, output, title)
+}
+
+// SaveVideoContext saves a video snippet to a file using a provided context.
+// Input must be an RTSP URL and output must be a file path. It will be overwritten.
+// Returns command used, command output and error or nil.
+// Use the context to add a timeout value (max run duration) to the ffmpeg command.
+func (e *Encoder) SaveVideoContext(ctx context.Context, input, output, title string) (string, string, error) {
 	if input == "" {
 		return "", "", ErrInvalidInput
 	} else if output == "" || output == "-" {
 		return "", "", ErrInvalidOutput
 	}
 
-	cmdStr, cmd := e.getVideoHandle(input, output, title)
+	cmdStr, cmd := e.getVideoHandle(ctx, input, output, title)
 	// log.Println(cmdStr) // DEBUG
 
 	var out bytes.Buffer
@@ -263,7 +303,9 @@ func (e *Encoder) SaveVideo(input, output, title string) (string, string, error)
 
 	if err := cmd.Start(); err != nil {
 		return cmdStr, strings.TrimSpace(out.String()), fmt.Errorf("subcommand failed: %w", err)
-	} else if err := cmd.Wait(); err != nil {
+	}
+
+	if err := cmd.Wait(); err != nil {
 		return cmdStr, strings.TrimSpace(out.String()), fmt.Errorf("subcommand failed: %w", err)
 	}
 
