@@ -68,7 +68,7 @@ func TestSaveVideo(t *testing.T) {
 	assert.True(strings.HasPrefix(cmd, "echo"), "The command does not - but should - begin with the Encoder value.")
 	assert.True(strings.HasSuffix(cmd, fileTemp),
 		"The command does not - but should - end with a dash to indicate output to stdout.")
-	assert.EqualValues(cmd+"\n", "echo "+out, "Somehow the wrong value was written")
+	assert.EqualValues(cmd, "echo "+strings.TrimSpace(out), "Somehow the wrong value was written")
 
 	// Make sure audio can be turned on.
 	encode = Get(&Config{FFMPEG: "echo", Audio: true})

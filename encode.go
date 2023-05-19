@@ -235,6 +235,7 @@ func (e *Encoder) GetVideo(input, title string) (string, io.ReadCloser, error) {
 
 	if e.config.Time > 0 {
 		var cancel func()
+
 		ctx, cancel = context.WithTimeout(ctx, time.Second*time.Duration(e.config.Time+1))
 		defer cancel()
 	}
