@@ -4,7 +4,6 @@
 package ffmpeg
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -298,18 +297,12 @@ func (e *Encoder) SaveVideoContext(ctx context.Context, input, output, title str
 	cmdStr, cmd := e.getVideoHandle(ctx, input, output, title)
 	// log.Println(cmdStr) // DEBUG
 
-	var out bytes.Buffer
-	cmd.Stderr, cmd.Stdout = &out, &out
-
-	if err := cmd.Start(); err != nil {
-		return cmdStr, strings.TrimSpace(out.String()), fmt.Errorf("subcommand failed: %w", err)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return cmdStr, string(out), fmt.Errorf("subcommand failed: %w", err)
 	}
 
-	if err := cmd.Wait(); err != nil {
-		return cmdStr, strings.TrimSpace(out.String()), fmt.Errorf("subcommand failed: %w", err)
-	}
-
-	return cmdStr, strings.TrimSpace(out.String()), nil
+	return cmdStr, string(out), nil
 }
 
 // fixValues makes sure video request values are sane.
