@@ -277,6 +277,7 @@ func (e *Encoder) SaveVideo(input, output, title string) (string, string, error)
 
 	if e.config.Time > 0 {
 		var cancel func()
+
 		ctx, cancel = context.WithTimeout(ctx, time.Second*time.Duration(e.config.Time+1))
 		defer cancel()
 	}
