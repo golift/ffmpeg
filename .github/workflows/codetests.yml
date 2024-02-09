@@ -35,7 +35,7 @@ jobs:
           go-version: 1.19
       - uses: actions/checkout@v4
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v4
         with:
           version: v1.50
   # Runs golangci-lint on linux against linux and windows.
@@ -53,6 +53,6 @@ jobs:
           go-version: 1.19
       - uses: actions/checkout@v4
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v4
         with:
           version: v1.50
