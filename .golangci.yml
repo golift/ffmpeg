@@ -1,18 +1,33 @@
+version: '2'
 linters:
-  enable-all: true
+  default: all
   disable:
-    # deprecated
-    - maligned
-    - scopelint
-    - interfacer
-    - golint
-    - exhaustivestruct
-    - nosnakecase
-    - structcheck
-    - deadcode
-    - varcheck
-    - ifshort
-    # unused
     - exhaustruct
-run:
-  timeout: 2m
+    - depguard
+    - wsl
+    - testpackage
+  settings:
+    gocritic:
+      enable-all: true
+      disabled-checks:
+        - commentedOutCode
+      settings:
+        unnamedResult:
+          checkExported: true
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+      disable-default-exclusions: false
+      exclude-functions:
+        - (*os.File).Close
+        - (io.Closer).Close
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
