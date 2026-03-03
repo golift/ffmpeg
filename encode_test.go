@@ -59,6 +59,8 @@ func TestSaveVideo(t *testing.T) {
 	asert.Contains(cmd, "-metadata title=TITLE", "TITLE value appears to be missing.")
 	asert.Contains(cmd, fmt.Sprintf("-vcodec libx264 -profile:v %v -level %v", DefaultProfile, DefaultLevel),
 		"Level or Profile are missing or out of order.")
+	asert.Contains(cmd, "-f mov", "File output should use mov container.")
+	asert.Contains(cmd, "-movflags faststart", "File output should set faststart for mov.")
 	asert.Contains(cmd, fmt.Sprintf("-crf %d", DefaultEncodeCRF), "CRF value is missing or malformed.")
 	asert.Contains(cmd, fmt.Sprintf("-t %d", DefaultCaptureTime),
 		"Capture Time value is missing or malformed.")
@@ -119,6 +121,9 @@ func TestGetVideoStreamLifecycle(t *testing.T) {
 	require.NoError(t, readErr)
 	require.NotEmpty(t, data)
 	require.Contains(t, string(data), "-metadata title=TITLE")
+	require.Contains(t, string(data), "-f mp4")
+	require.Contains(t, string(data), "-movflags frag_keyframe+empty_moov")
+	require.NotContains(t, string(data), "-movflags faststart")
 	require.NoError(t, stream.Close())
 	require.Contains(t, cmd, "-metadata title=TITLE")
 }

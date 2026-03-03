@@ -382,9 +382,14 @@ func (e *Encoder) getVideoHandle(ctx context.Context, input, output, title strin
 		"-v", "16", // log level
 		"-rtsp_transport", "tcp",
 		"-i", input,
-		"-f", "mov",
 		"-metadata", "title=" + title,
 		"-y", "-map", "0",
+	}
+
+	if output == "-" {
+		arg = append(arg, "-f", "mp4", "-movflags", "frag_keyframe+empty_moov")
+	} else {
+		arg = append(arg, "-f", "mov")
 	}
 
 	if e.config.Size > 0 {
@@ -400,12 +405,15 @@ func (e *Encoder) getVideoHandle(ctx context.Context, input, output, title strin
 			"-profile:v", e.config.Prof,
 			"-level", e.config.Level,
 			"-pix_fmt", "yuv420p",
-			"-movflags", "faststart",
 			"-s", strconv.Itoa(e.config.Width)+"x"+strconv.Itoa(e.config.Height),
 			"-preset", "superfast",
 			"-crf", strconv.Itoa(e.config.CRF),
 			"-r", strconv.Itoa(e.config.Rate),
 		)
+
+		if output != "-" {
+			arg = append(arg, "-movflags", "faststart")
+		}
 	} else {
 		arg = append(arg, "-c", "copy")
 	}
