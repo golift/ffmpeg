@@ -1,7 +1,9 @@
 package ffmpeg
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"log"
 	"strings"
 	"testing"
@@ -9,8 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// XXX: test v.Copy, test GetVideo (better)
 
 func TestFixValues(t *testing.T) {
 	t.Parallel()
@@ -56,7 +56,7 @@ func TestSaveVideo(t *testing.T) {
 	asert.Contains(cmd, "-an", "Audio may not be correctly disabled.")
 	asert.Contains(cmd,
 		"-rtsp_transport tcp -i INPUT", "INPUT value appears to be missing, or rtsp transport is out of order")
-	asert.Contains(cmd, "-metadata title=\"TITLE\"", "TITLE value appears to be missing.")
+	asert.Contains(cmd, "-metadata title=TITLE", "TITLE value appears to be missing.")
 	asert.Contains(cmd, fmt.Sprintf("-vcodec libx264 -profile:v %v -level %v", DefaultProfile, DefaultLevel),
 		"Level or Profile are missing or out of order.")
 	asert.Contains(cmd, fmt.Sprintf("-crf %d", DefaultEncodeCRF), "CRF value is missing or malformed.")
@@ -77,6 +77,77 @@ func TestSaveVideo(t *testing.T) {
 
 	require.NoError(t, err, "echo returned an error. Something may be wrong with your environment.")
 	asert.Contains(cmd, "-c:a copy", "Audio may not be correctly enabled.")
+}
+
+func TestSaveVideoErrors(t *testing.T) {
+	t.Parallel()
+
+	encode := Get(&Config{FFMPEG: "echo"})
+	_, _, err := encode.SaveVideoContext(context.Background(), "", "/tmp/nope", "title")
+	require.ErrorIs(t, err, ErrInvalidInput)
+
+	_, _, err = encode.SaveVideoContext(context.Background(), "INPUT", "", "title")
+	require.ErrorIs(t, err, ErrInvalidOutput)
+
+	_, _, err = encode.SaveVideoContext(context.Background(), "INPUT", "-", "title")
+	require.ErrorIs(t, err, ErrInvalidOutput)
+}
+
+func TestGetVideoContextErrors(t *testing.T) {
+	t.Parallel()
+
+	encode := Get(&Config{FFMPEG: "echo"})
+	_, _, err := encode.GetVideoContext(context.Background(), "", "title")
+	require.ErrorIs(t, err, ErrInvalidInput)
+
+	encode = Get(&Config{FFMPEG: "/path/that/does/not/exist/ffmpeg"})
+	_, stream, err := encode.GetVideoContext(context.Background(), "INPUT", "title")
+	require.Error(t, err)
+	require.Nil(t, stream)
+	require.Contains(t, err.Error(), "run failed")
+}
+
+func TestGetVideoStreamLifecycle(t *testing.T) {
+	t.Parallel()
+
+	encode := Get(&Config{FFMPEG: "echo"})
+	cmd, stream, err := encode.GetVideoContext(context.Background(), "INPUT", "TITLE")
+	require.NoError(t, err)
+	require.NotNil(t, stream)
+
+	data, readErr := io.ReadAll(stream)
+	require.NoError(t, readErr)
+	require.NotEmpty(t, data)
+	require.Contains(t, string(data), "-metadata title=TITLE")
+	require.NoError(t, stream.Close())
+	require.Contains(t, cmd, "-metadata title=TITLE")
+}
+
+func TestGetVideoTitleFallbackAndCopy(t *testing.T) {
+	t.Parallel()
+
+	encode := Get(&Config{
+		FFMPEG: "echo",
+		Copy:   true,
+		Audio:  true,
+	})
+
+	cmd, stream, err := encode.GetVideoContext(context.Background(), "INPUT", "")
+	require.NoError(t, err)
+	require.NotNil(t, stream)
+	_, _ = io.ReadAll(stream)
+	require.NoError(t, stream.Close())
+	require.Contains(t, cmd, "-c copy")
+	require.Contains(t, cmd, "-c:a copy")
+	require.Contains(t, cmd, "-metadata title=-")
+}
+
+func TestGetNilConfig(t *testing.T) {
+	t.Parallel()
+
+	config := Get(nil).Config()
+	require.Equal(t, DefaultFFmpegPath, config.FFMPEG)
+	require.Equal(t, DefaultFrameRate, config.Rate)
 }
 
 func TestValues(t *testing.T) {
