@@ -1,5 +1,8 @@
 name: test-and-lint
 on:
+  push:
+    branches:
+    - main
   pull_request:
     branches:
     - main
@@ -18,7 +21,7 @@ jobs:
         with:
           go-version: stable
       - name: go-test
-        run: 	go test -race -covermode=atomic ./...
+        run: go test -race -covermode=atomic -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
 
   # Runs golangci-lint on macos against freebsd and macos.
   golangci-darwin:

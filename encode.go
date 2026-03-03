@@ -4,6 +4,7 @@
 package ffmpeg
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -47,6 +49,8 @@ var (
 const (
 	bits64 = 64
 	base10 = 10
+	// Keep the last bytes of ffmpeg stderr to improve diagnostics.
+	defaultStderrTail = 8192
 )
 
 // Config defines how ffmpeg shall transcode a stream.
@@ -73,7 +77,12 @@ type Encoder struct {
 
 // Get an encoder interface.
 func Get(config *Config) *Encoder {
-	encode := &Encoder{config: config}
+	cfg := &Config{}
+	if config != nil {
+		*cfg = *config
+	}
+
+	encode := &Encoder{config: cfg}
 	if encode.config.FFMPEG == "" {
 		encode.config.FFMPEG = DefaultFFmpegPath
 	}
@@ -180,50 +189,88 @@ func (e *Encoder) SetSize(size string) int64 {
 
 // GetVideo retreives video from an input and returns an io.ReadCloser to consume the output.
 // Input must be an RTSP URL. Title is encoded into the video as the "movie title."
-// Returns command used, io.ReadCloser and error or nil.
+// Returns command used for diagnostics, io.ReadCloser and error or nil.
 // This will automatically create a context with a timeout equal to the time duration requested plus 1 second.
 // If no time duration is requested the context has no timeout.
 // If you want to control the context, use GetVideoContext().
 func (e *Encoder) GetVideo(input, title string) (string, io.ReadCloser, error) {
 	ctx := context.Background()
 
-	if e.config.Time > 0 {
-		var cancel func()
+	var cancel context.CancelFunc
 
+	if e.config.Time > 0 {
 		ctx, cancel = context.WithTimeout(ctx, time.Second*time.Duration(e.config.Time+1))
-		defer cancel()
 	}
 
-	return e.GetVideoContext(ctx, input, title)
+	cmdStr, stream, err := e.GetVideoContext(ctx, input, title)
+	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
+
+		return cmdStr, nil, err
+	}
+
+	if cancel == nil {
+		return cmdStr, stream, nil
+	}
+
+	return cmdStr, &cancelReadCloser{ReadCloser: stream, cancel: cancel}, nil
 }
 
 // GetVideoContext retreives video from an input and returns an io.ReadCloser to consume the output.
 // Input must be an RTSP URL. Title is encoded into the video as the "movie title."
-// Returns command used, io.ReadCloser and error or nil.
+// Returns command used for diagnostics, io.ReadCloser and error or nil.
 // Use the context to add a timeout value (max run duration) to the ffmpeg command.
+//
+//nolint:contextcheck // caller-provided context is accepted and used for command execution.
 func (e *Encoder) GetVideoContext(ctx context.Context, input, title string) (string, io.ReadCloser, error) {
 	if input == "" {
 		return "", nil, ErrInvalidInput
 	}
 
-	cmdStr, cmd := e.getVideoHandle(ctx, input, "-", title)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	cmdCtx, cmdCancel := context.WithCancel(ctx)
+	cmdStr, cmd := e.getVideoHandle(cmdCtx, input, "-", title)
+	stderr := newTailBuffer(defaultStderrTail)
+	cmd.Stderr = stderr
 
 	stdoutpipe, err := cmd.StdoutPipe()
 	if err != nil {
+		cmdCancel()
+
 		return cmdStr, nil, fmt.Errorf("subcommand failed: %w", err)
 	}
 
-	err = cmd.Run()
+	err = cmd.Start()
 	if err != nil {
-		return cmdStr, stdoutpipe, fmt.Errorf("run failed: %w", err)
+		_ = stdoutpipe.Close()
+
+		cmdCancel()
+
+		return cmdStr, nil, withStderr("run failed", err, stderr.String())
 	}
 
-	return cmdStr, stdoutpipe, nil
+	done := make(chan error, 1)
+
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	return cmdStr, &streamResult{
+		out:       stdoutpipe,
+		done:      done,
+		cmdCancel: cmdCancel,
+		stderr:    stderr,
+	}, nil
 }
 
 // SaveVideo saves a video snippet to a file.
 // Input must be an RTSP URL and output must be a file path. It will be overwritten.
-// Returns command used, command output and error or nil.
+// Returns command used for diagnostics, command output and error or nil.
 // This will automatically create a context with a timeout equal to the time duration requested plus 1 second.
 // If no time duration is requested the context has no timeout.
 // If you want to control the context, use SaveVideoContext().
@@ -244,7 +291,7 @@ func (e *Encoder) SaveVideo(input, output, title string) (cmdStr, outputStr stri
 
 // SaveVideoContext saves a video snippet to a file using a provided context.
 // Input must be an RTSP URL and output must be a file path. It will be overwritten.
-// Returns command used, command output and error or nil.
+// Returns command used for diagnostics, command output and error or nil.
 // Use the context to add a timeout value (max run duration) to the ffmpeg command.
 //
 //nolint:nonamedreturns // the names help readability.
@@ -253,19 +300,26 @@ func (e *Encoder) SaveVideoContext(
 ) (cmdStr, outputStr string, err error) {
 	if input == "" {
 		return "", "", ErrInvalidInput
-	} else if output == "" || output == "-" {
+	}
+
+	if output == "" || output == "-" {
 		return "", "", ErrInvalidOutput
 	}
 
 	cmdStr, cmd := e.getVideoHandle(ctx, input, output, title)
-	// log.Println(cmdStr) // DEBUG
+	stderr := newTailBuffer(defaultStderrTail)
 
-	out, err := cmd.CombinedOutput()
+	var stdout bytes.Buffer
+
+	cmd.Stdout = &stdout
+	cmd.Stderr = stderr
+
+	err = cmd.Run()
 	if err != nil {
-		return cmdStr, string(out), fmt.Errorf("subcommand failed: %w", err)
+		return cmdStr, stdout.String(), withStderr("subcommand failed", err, stderr.String())
 	}
 
-	return cmdStr, string(out), nil
+	return cmdStr, stdout.String(), nil
 }
 
 // fixValues makes sure video request values are sane.
@@ -333,9 +387,14 @@ func (e *Encoder) getVideoHandle(ctx context.Context, input, output, title strin
 		"-v", "16", // log level
 		"-rtsp_transport", "tcp",
 		"-i", input,
-		"-f", "mov",
-		"-metadata", `title="` + title + `"`,
+		"-metadata", "title=" + title,
 		"-y", "-map", "0",
+	}
+
+	if output == "-" {
+		arg = append(arg, "-f", "mp4", "-movflags", "frag_keyframe+empty_moov")
+	} else {
+		arg = append(arg, "-f", "mov")
 	}
 
 	if e.config.Size > 0 {
@@ -351,12 +410,15 @@ func (e *Encoder) getVideoHandle(ctx context.Context, input, output, title strin
 			"-profile:v", e.config.Prof,
 			"-level", e.config.Level,
 			"-pix_fmt", "yuv420p",
-			"-movflags", "faststart",
 			"-s", strconv.Itoa(e.config.Width)+"x"+strconv.Itoa(e.config.Height),
 			"-preset", "superfast",
 			"-crf", strconv.Itoa(e.config.CRF),
 			"-r", strconv.Itoa(e.config.Rate),
 		)
+
+		if output != "-" {
+			arg = append(arg, "-movflags", "faststart")
+		}
 	} else {
 		arg = append(arg, "-c", "copy")
 	}
@@ -369,6 +431,113 @@ func (e *Encoder) getVideoHandle(ctx context.Context, input, output, title strin
 
 	arg = append(arg, output) // save file path goes last.
 
+	// This command string is for diagnostics only; it is not shell-escaped.
 	//nolint:gosec // it's ok, but maybe it's not.
 	return strings.Join(arg, " "), exec.CommandContext(ctx, arg[0], arg[1:]...)
+}
+
+// streamResult is our custom io.ReadCloser that also cleans up the command and context.
+type streamResult struct {
+	out       io.ReadCloser
+	done      <-chan error
+	cmdCancel context.CancelFunc
+	stderr    *tailBuffer
+	closeOnce sync.Once
+	closeErr  error
+}
+
+func (s *streamResult) Read(data []byte) (int, error) {
+	bytesRead, err := s.out.Read(data)
+	if err == nil {
+		return bytesRead, nil
+	}
+
+	if errors.Is(err, io.EOF) {
+		return bytesRead, io.EOF
+	}
+
+	if err != nil {
+		return bytesRead, fmt.Errorf("read stream: %w", err)
+	}
+
+	return bytesRead, nil
+}
+
+func (s *streamResult) Close() error {
+	s.closeOnce.Do(func() {
+		s.cmdCancel()
+
+		_ = s.out.Close()
+
+		waitErr := <-s.done
+		if waitErr != nil && !errors.Is(waitErr, context.Canceled) {
+			s.closeErr = withStderr("run failed", waitErr, s.stderr.String())
+		}
+	})
+
+	return s.closeErr
+}
+
+type tailBuffer struct {
+	buf []byte
+	max int
+}
+
+func newTailBuffer(limit int) *tailBuffer {
+	return &tailBuffer{max: limit}
+}
+
+func (t *tailBuffer) Write(data []byte) (int, error) {
+	if t.max <= 0 {
+		return len(data), nil
+	}
+
+	if len(data) >= t.max {
+		t.buf = append(t.buf[:0], data[len(data)-t.max:]...)
+
+		return len(data), nil
+	}
+
+	need := len(t.buf) + len(data) - t.max
+	if need > 0 {
+		t.buf = append(t.buf[:0], t.buf[need:]...)
+	}
+
+	t.buf = append(t.buf, data...)
+
+	return len(data), nil
+}
+
+func (t *tailBuffer) String() string {
+	return strings.TrimSpace(string(t.buf))
+}
+
+func withStderr(prefix string, err error, stderr string) error {
+	if stderr == "" {
+		return fmt.Errorf("%s: %w", prefix, err)
+	}
+
+	return fmt.Errorf("%s: %w: %s", prefix, err, stderr)
+}
+
+type cancelReadCloser struct {
+	io.ReadCloser
+
+	cancel    context.CancelFunc
+	closeOnce sync.Once
+}
+
+func (c *cancelReadCloser) Close() error {
+	var err error
+
+	c.closeOnce.Do(func() {
+		err = c.ReadCloser.Close()
+		c.cancel()
+	})
+
+	if err != nil {
+		return fmt.Errorf("close stream: %w", err)
+	}
+
+	return nil
 }
