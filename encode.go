@@ -5,6 +5,7 @@ package ffmpeg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -16,7 +17,7 @@ import (
 
 // Default, Maximum and Minimum Values for encoder configuration. Change these if your needs differ.
 //
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals,mnd // these are constants, not variables, but configurable by a consumer.
 var (
 	DefaultFrameRate   = 5
 	MinimumFrameRate   = 1
@@ -30,8 +31,8 @@ var (
 	MaximumEncodeCRF   = 30
 	DefaultCaptureTime = 15
 	MaximumCaptureTime = 1200             // 10 minute max.
-	DefaultCaptureSize = int64(2500000)   //nolint:gomnd,nolintlint // 2.5MB default (roughly 5-10 seconds)
-	MaximumCaptureSize = int64(104857600) //nolint:gomnd,nolintlint // 100MB max.
+	DefaultCaptureSize = int64(2500000)   // 2.5MB default (roughly 5-10 seconds)
+	MaximumCaptureSize = int64(104857600) // 100MB max.
 	DefaultFFmpegPath  = "/usr/local/bin/ffmpeg"
 	DefaultProfile     = "main"
 	DefaultLevel       = "3.0"
@@ -39,8 +40,13 @@ var (
 
 // Custom errors that this library outputs. The library also outputs errors created elsewhere.
 var (
-	ErrInvalidOutput = fmt.Errorf("output path is not valid")
-	ErrInvalidInput  = fmt.Errorf("input path is not valid")
+	ErrInvalidOutput = errors.New("output path is not valid")
+	ErrInvalidInput  = errors.New("input path is not valid")
+)
+
+const (
+	bits64 = 64
+	base10 = 10
 )
 
 // Config defines how ffmpeg shall transcode a stream.
@@ -165,63 +171,11 @@ func (e *Encoder) SetRate(rate string) int {
 // SetSize sets the maximum transcode file size as a string.
 // This can also be passed into Get() as an int64.
 func (e *Encoder) SetSize(size string) int64 {
-	e.config.Size, _ = strconv.ParseInt(size, 10, 64) //nolint:gomnd,nolintlint
+	e.config.Size, _ = strconv.ParseInt(size, base10, bits64)
 
 	e.fixValues()
 
 	return e.config.Size
-}
-
-// getVideoHandle is a helper function that creates and returns an ffmpeg command.
-// This is used by higher level function to cobble together an input stream.
-func (e *Encoder) getVideoHandle(ctx context.Context, input, output, title string) (string, *exec.Cmd) {
-	if title == "" {
-		title = filepath.Base(output)
-	}
-
-	// the order of these values is important.
-	arg := []string{
-		e.config.FFMPEG,
-		"-v", "16", // log level
-		"-rtsp_transport", "tcp",
-		"-i", input,
-		"-f", "mov",
-		"-metadata", `title="` + title + `"`,
-		"-y", "-map", "0",
-	}
-
-	if e.config.Size > 0 {
-		arg = append(arg, "-fs", strconv.FormatInt(e.config.Size, 10)) //nolint:gomnd,nolintlint
-	}
-
-	if e.config.Time > 0 {
-		arg = append(arg, "-t", strconv.Itoa(e.config.Time))
-	}
-
-	if !e.config.Copy {
-		arg = append(arg, "-vcodec", "libx264",
-			"-profile:v", e.config.Prof,
-			"-level", e.config.Level,
-			"-pix_fmt", "yuv420p",
-			"-movflags", "faststart",
-			"-s", strconv.Itoa(e.config.Width)+"x"+strconv.Itoa(e.config.Height),
-			"-preset", "superfast",
-			"-crf", strconv.Itoa(e.config.CRF),
-			"-r", strconv.Itoa(e.config.Rate),
-		)
-	} else {
-		arg = append(arg, "-c", "copy")
-	}
-
-	if !e.config.Audio {
-		arg = append(arg, "-an")
-	} else {
-		arg = append(arg, "-c:a", "copy")
-	}
-
-	arg = append(arg, output) // save file path goes last.
-
-	return strings.Join(arg, " "), exec.CommandContext(ctx, arg[0], arg[1:]...) //nolint:Gosec
 }
 
 // GetVideo retreives video from an input and returns an io.ReadCloser to consume the output.
@@ -259,7 +213,8 @@ func (e *Encoder) GetVideoContext(ctx context.Context, input, title string) (str
 		return cmdStr, nil, fmt.Errorf("subcommand failed: %w", err)
 	}
 
-	if err := cmd.Run(); err != nil {
+	err = cmd.Run()
+	if err != nil {
 		return cmdStr, stdoutpipe, fmt.Errorf("run failed: %w", err)
 	}
 
@@ -272,7 +227,9 @@ func (e *Encoder) GetVideoContext(ctx context.Context, input, title string) (str
 // This will automatically create a context with a timeout equal to the time duration requested plus 1 second.
 // If no time duration is requested the context has no timeout.
 // If you want to control the context, use SaveVideoContext().
-func (e *Encoder) SaveVideo(input, output, title string) (string, string, error) {
+//
+//nolint:nonamedreturns // the names help readability.
+func (e *Encoder) SaveVideo(input, output, title string) (cmdStr, outputStr string, err error) {
 	ctx := context.Background()
 
 	if e.config.Time > 0 {
@@ -289,7 +246,11 @@ func (e *Encoder) SaveVideo(input, output, title string) (string, string, error)
 // Input must be an RTSP URL and output must be a file path. It will be overwritten.
 // Returns command used, command output and error or nil.
 // Use the context to add a timeout value (max run duration) to the ffmpeg command.
-func (e *Encoder) SaveVideoContext(ctx context.Context, input, output, title string) (string, string, error) {
+//
+//nolint:nonamedreturns // the names help readability.
+func (e *Encoder) SaveVideoContext(
+	ctx context.Context, input, output, title string,
+) (cmdStr, outputStr string, err error) {
 	if input == "" {
 		return "", "", ErrInvalidInput
 	} else if output == "" || output == "-" {
@@ -308,7 +269,7 @@ func (e *Encoder) SaveVideoContext(ctx context.Context, input, output, title str
 }
 
 // fixValues makes sure video request values are sane.
-func (e *Encoder) fixValues() { //nolint:cyclop
+func (e *Encoder) fixValues() { //nolint:cyclop // it's a simple switch statement.
 	switch {
 	case e.config.Height == 0:
 		e.config.Height = DefaultFrameHeight
@@ -357,4 +318,57 @@ func (e *Encoder) fixValues() { //nolint:cyclop
 	} else if e.config.Size > MaximumCaptureSize {
 		e.config.Size = MaximumCaptureSize
 	}
+}
+
+// getVideoHandle is a helper function that creates and returns an ffmpeg command.
+// This is used by higher level function to cobble together an input stream.
+func (e *Encoder) getVideoHandle(ctx context.Context, input, output, title string) (string, *exec.Cmd) {
+	if title == "" {
+		title = filepath.Base(output)
+	}
+
+	// the order of these values is important.
+	arg := []string{
+		e.config.FFMPEG,
+		"-v", "16", // log level
+		"-rtsp_transport", "tcp",
+		"-i", input,
+		"-f", "mov",
+		"-metadata", `title="` + title + `"`,
+		"-y", "-map", "0",
+	}
+
+	if e.config.Size > 0 {
+		arg = append(arg, "-fs", strconv.FormatInt(e.config.Size, base10))
+	}
+
+	if e.config.Time > 0 {
+		arg = append(arg, "-t", strconv.Itoa(e.config.Time))
+	}
+
+	if !e.config.Copy {
+		arg = append(arg, "-vcodec", "libx264",
+			"-profile:v", e.config.Prof,
+			"-level", e.config.Level,
+			"-pix_fmt", "yuv420p",
+			"-movflags", "faststart",
+			"-s", strconv.Itoa(e.config.Width)+"x"+strconv.Itoa(e.config.Height),
+			"-preset", "superfast",
+			"-crf", strconv.Itoa(e.config.CRF),
+			"-r", strconv.Itoa(e.config.Rate),
+		)
+	} else {
+		arg = append(arg, "-c", "copy")
+	}
+
+	if !e.config.Audio {
+		arg = append(arg, "-an")
+	} else {
+		arg = append(arg, "-c:a", "copy")
+	}
+
+	arg = append(arg, output) // save file path goes last.
+
+	//nolint:gosec // it's ok, but maybe it's not.
+	return strings.Join(arg, " "), exec.CommandContext(ctx, arg[0], arg[1:]...)
 }

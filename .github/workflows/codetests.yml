@@ -13,10 +13,10 @@ jobs:
         os: [macos, windows, ubuntu]
     runs-on: ${{ matrix.os }}-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
-          go-version: 1.19
+          go-version: stable
       - name: go-test
         run: 	go test -race -covermode=atomic ./...
 
@@ -30,14 +30,14 @@ jobs:
     env:
       GOOS: ${{ matrix.os }}
     steps:
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v6
         with:
-          go-version: 1.19
-      - uses: actions/checkout@v4
+          go-version: stable
+      - uses: actions/checkout@v6
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.50
+          version: v2.9
   # Runs golangci-lint on linux against linux and windows.
   golangci-linux:
     strategy:
@@ -48,11 +48,11 @@ jobs:
     env:
       GOOS: ${{ matrix.os }}
     steps:
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v6
         with:
-          go-version: 1.19
-      - uses: actions/checkout@v4
+          go-version: stable
+      - uses: actions/checkout@v6
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.50
+          version: v2.9
