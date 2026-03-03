@@ -195,28 +195,36 @@ func (e *Encoder) SetSize(size string) int64 {
 // If you want to control the context, use GetVideoContext().
 func (e *Encoder) GetVideo(input, title string) (string, io.ReadCloser, error) {
 	ctx := context.Background()
-	var cancel func()
+
+	var cancel context.CancelFunc
 
 	if e.config.Time > 0 {
 		ctx, cancel = context.WithTimeout(ctx, time.Second*time.Duration(e.config.Time+1))
 	}
 
-	return e.getVideoContext(ctx, cancel, input, title)
+	cmdStr, stream, err := e.GetVideoContext(ctx, input, title)
+	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
+
+		return cmdStr, nil, err
+	}
+
+	if cancel == nil {
+		return cmdStr, stream, nil
+	}
+
+	return cmdStr, &cancelReadCloser{ReadCloser: stream, cancel: cancel}, nil
 }
 
 // GetVideoContext retreives video from an input and returns an io.ReadCloser to consume the output.
 // Input must be an RTSP URL. Title is encoded into the video as the "movie title."
 // Returns command used for diagnostics, io.ReadCloser and error or nil.
 // Use the context to add a timeout value (max run duration) to the ffmpeg command.
+//
+//nolint:contextcheck // caller-provided context is accepted and used for command execution.
 func (e *Encoder) GetVideoContext(ctx context.Context, input, title string) (string, io.ReadCloser, error) {
-	return e.getVideoContext(ctx, nil, input, title)
-}
-
-func (e *Encoder) getVideoContext(
-	ctx context.Context,
-	parentCancel context.CancelFunc,
-	input, title string,
-) (string, io.ReadCloser, error) {
 	if input == "" {
 		return "", nil, ErrInvalidInput
 	}
@@ -233,9 +241,6 @@ func (e *Encoder) getVideoContext(
 	stdoutpipe, err := cmd.StdoutPipe()
 	if err != nil {
 		cmdCancel()
-		if parentCancel != nil {
-			parentCancel()
-		}
 
 		return cmdStr, nil, fmt.Errorf("subcommand failed: %w", err)
 	}
@@ -243,25 +248,23 @@ func (e *Encoder) getVideoContext(
 	err = cmd.Start()
 	if err != nil {
 		_ = stdoutpipe.Close()
+
 		cmdCancel()
-		if parentCancel != nil {
-			parentCancel()
-		}
 
 		return cmdStr, nil, withStderr("run failed", err, stderr.String())
 	}
 
 	done := make(chan error, 1)
+
 	go func() {
 		done <- cmd.Wait()
 	}()
 
 	return cmdStr, &streamResult{
-		out:          stdoutpipe,
-		done:         done,
-		cmdCancel:    cmdCancel,
-		parentCancel: parentCancel,
-		stderr:       stderr,
+		out:       stdoutpipe,
+		done:      done,
+		cmdCancel: cmdCancel,
+		stderr:    stderr,
 	}, nil
 }
 
@@ -305,7 +308,9 @@ func (e *Encoder) SaveVideoContext(
 
 	cmdStr, cmd := e.getVideoHandle(ctx, input, output, title)
 	stderr := newTailBuffer(defaultStderrTail)
+
 	var stdout bytes.Buffer
+
 	cmd.Stdout = &stdout
 	cmd.Stderr = stderr
 
@@ -433,27 +438,37 @@ func (e *Encoder) getVideoHandle(ctx context.Context, input, output, title strin
 
 // streamResult is our custom io.ReadCloser that also cleans up the command and context.
 type streamResult struct {
-	out          io.ReadCloser
-	done         <-chan error
-	cmdCancel    context.CancelFunc
-	parentCancel context.CancelFunc
-	stderr       *tailBuffer
-	closeOnce    sync.Once
-	closeErr     error
+	out       io.ReadCloser
+	done      <-chan error
+	cmdCancel context.CancelFunc
+	stderr    *tailBuffer
+	closeOnce sync.Once
+	closeErr  error
 }
 
-func (s *streamResult) Read(p []byte) (int, error) {
-	return s.out.Read(p)
+func (s *streamResult) Read(data []byte) (int, error) {
+	bytesRead, err := s.out.Read(data)
+	if err == nil {
+		return bytesRead, nil
+	}
+
+	if errors.Is(err, io.EOF) {
+		return bytesRead, io.EOF
+	}
+
+	if err != nil {
+		return bytesRead, fmt.Errorf("read stream: %w", err)
+	}
+
+	return bytesRead, nil
 }
 
 func (s *streamResult) Close() error {
 	s.closeOnce.Do(func() {
 		s.cmdCancel()
-		if s.parentCancel != nil {
-			s.parentCancel()
-		}
 
 		_ = s.out.Close()
+
 		waitErr := <-s.done
 		if waitErr != nil && !errors.Is(waitErr, context.Canceled) {
 			s.closeErr = withStderr("run failed", waitErr, s.stderr.String())
@@ -468,29 +483,29 @@ type tailBuffer struct {
 	max int
 }
 
-func newTailBuffer(max int) *tailBuffer {
-	return &tailBuffer{max: max}
+func newTailBuffer(limit int) *tailBuffer {
+	return &tailBuffer{max: limit}
 }
 
-func (t *tailBuffer) Write(p []byte) (int, error) {
+func (t *tailBuffer) Write(data []byte) (int, error) {
 	if t.max <= 0 {
-		return len(p), nil
+		return len(data), nil
 	}
 
-	if len(p) >= t.max {
-		t.buf = append(t.buf[:0], p[len(p)-t.max:]...)
+	if len(data) >= t.max {
+		t.buf = append(t.buf[:0], data[len(data)-t.max:]...)
 
-		return len(p), nil
+		return len(data), nil
 	}
 
-	need := len(t.buf) + len(p) - t.max
+	need := len(t.buf) + len(data) - t.max
 	if need > 0 {
 		t.buf = append(t.buf[:0], t.buf[need:]...)
 	}
 
-	t.buf = append(t.buf, p...)
+	t.buf = append(t.buf, data...)
 
-	return len(p), nil
+	return len(data), nil
 }
 
 func (t *tailBuffer) String() string {
@@ -503,4 +518,26 @@ func withStderr(prefix string, err error, stderr string) error {
 	}
 
 	return fmt.Errorf("%s: %w: %s", prefix, err, stderr)
+}
+
+type cancelReadCloser struct {
+	io.ReadCloser
+
+	cancel    context.CancelFunc
+	closeOnce sync.Once
+}
+
+func (c *cancelReadCloser) Close() error {
+	var err error
+
+	c.closeOnce.Do(func() {
+		err = c.ReadCloser.Close()
+		c.cancel()
+	})
+
+	if err != nil {
+		return fmt.Errorf("close stream: %w", err)
+	}
+
+	return nil
 }
