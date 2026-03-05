@@ -54,8 +54,7 @@ func TestSaveVideo(t *testing.T) {
 
 	// Make sure the produced command has all the expected values.
 	asert.Contains(cmd, "-an", "Audio may not be correctly disabled.")
-	asert.Contains(cmd,
-		"-rtsp_transport tcp -i INPUT", "INPUT value appears to be missing, or rtsp transport is out of order")
+	asert.Contains(cmd, "-i INPUT", "INPUT value appears to be missing")
 	asert.Contains(cmd, "-metadata title=TITLE", "TITLE value appears to be missing.")
 	asert.Contains(cmd, fmt.Sprintf("-vcodec libx264 -profile:v %v -level %v", DefaultProfile, DefaultLevel),
 		"Level or Profile are missing or out of order.")
@@ -79,6 +78,20 @@ func TestSaveVideo(t *testing.T) {
 
 	require.NoError(t, err, "echo returned an error. Something may be wrong with your environment.")
 	asert.Contains(cmd, "-c:a copy", "Audio may not be correctly enabled.")
+}
+
+func TestRTSPTransportOption(t *testing.T) {
+	t.Parallel()
+
+	encode := Get(&Config{FFMPEG: "echo"})
+
+	rtspCmd, _, err := encode.SaveVideo("rtsp://example.local/stream", "/tmp/out.mov", "TITLE")
+	require.NoError(t, err)
+	require.Contains(t, rtspCmd, "-rtsp_transport tcp")
+
+	httpsCmd, _, err := encode.SaveVideo("https://example.local/++video", "/tmp/out.mov", "TITLE")
+	require.NoError(t, err)
+	require.NotContains(t, httpsCmd, "-rtsp_transport tcp")
 }
 
 func TestSaveVideoErrors(t *testing.T) {
