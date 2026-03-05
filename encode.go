@@ -394,7 +394,7 @@ func (e *Encoder) getVideoHandle(ctx context.Context, input, output, title strin
 	}
 
 	if isRTSP(input) {
-		arg = append(arg[:2], append([]string{"-rtsp_transport", "tcp"}, arg[2:]...)...)
+		arg = append(arg[:3], append([]string{"-rtsp_transport", "tcp"}, arg[3:]...)...)
 	}
 
 	if output == "-" {
