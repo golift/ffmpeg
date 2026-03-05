@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -51,6 +52,8 @@ const (
 	base10 = 10
 	// Keep the last bytes of ffmpeg stderr to improve diagnostics.
 	defaultStderrTail = 8192
+	// Account for slow live streams: processing may take longer than clip length.
+	minCommandTimeout = 30 * time.Second
 )
 
 // Config defines how ffmpeg shall transcode a stream.
@@ -190,8 +193,8 @@ func (e *Encoder) SetSize(size string) int64 {
 // GetVideo retreives video from an input and returns an io.ReadCloser to consume the output.
 // Input must be an RTSP URL. Title is encoded into the video as the "movie title."
 // Returns command used for diagnostics, io.ReadCloser and error or nil.
-// This will automatically create a context with a timeout equal to the time duration requested plus 1 second.
-// If no time duration is requested the context has no timeout.
+// This will automatically create a context timeout based on the requested capture length.
+// For full timeout control, use GetVideoContext().
 // If you want to control the context, use GetVideoContext().
 func (e *Encoder) GetVideo(input, title string) (string, io.ReadCloser, error) {
 	ctx := context.Background()
@@ -199,7 +202,7 @@ func (e *Encoder) GetVideo(input, title string) (string, io.ReadCloser, error) {
 	var cancel context.CancelFunc
 
 	if e.config.Time > 0 {
-		ctx, cancel = context.WithTimeout(ctx, time.Second*time.Duration(e.config.Time+1))
+		ctx, cancel = context.WithTimeout(ctx, captureTimeout(e.config.Time))
 	}
 
 	cmdStr, stream, err := e.GetVideoContext(ctx, input, title)
@@ -271,8 +274,8 @@ func (e *Encoder) GetVideoContext(ctx context.Context, input, title string) (str
 // SaveVideo saves a video snippet to a file.
 // Input must be an RTSP URL and output must be a file path. It will be overwritten.
 // Returns command used for diagnostics, command output and error or nil.
-// This will automatically create a context with a timeout equal to the time duration requested plus 1 second.
-// If no time duration is requested the context has no timeout.
+// This will automatically create a context timeout based on the requested capture length.
+// For full timeout control, use SaveVideoContext().
 // If you want to control the context, use SaveVideoContext().
 //
 //nolint:nonamedreturns // the names help readability.
@@ -282,7 +285,7 @@ func (e *Encoder) SaveVideo(input, output, title string) (cmdStr, outputStr stri
 	if e.config.Time > 0 {
 		var cancel func()
 
-		ctx, cancel = context.WithTimeout(ctx, time.Second*time.Duration(e.config.Time+1))
+		ctx, cancel = context.WithTimeout(ctx, captureTimeout(e.config.Time))
 		defer cancel()
 	}
 
@@ -316,7 +319,7 @@ func (e *Encoder) SaveVideoContext(
 
 	err = cmd.Run()
 	if err != nil {
-		return cmdStr, stdout.String(), withStderr("subcommand failed", err, stderr.String())
+		return cmdStr, stdout.String(), runError(ctx, "subcommand failed", err, stderr.String())
 	}
 
 	return cmdStr, stdout.String(), nil
@@ -385,10 +388,13 @@ func (e *Encoder) getVideoHandle(ctx context.Context, input, output, title strin
 	arg := []string{
 		e.config.FFMPEG,
 		"-v", "16", // log level
-		"-rtsp_transport", "tcp",
 		"-i", input,
 		"-metadata", "title=" + title,
 		"-y", "-map", "0",
+	}
+
+	if isRTSP(input) {
+		arg = append(arg[:2], append([]string{"-rtsp_transport", "tcp"}, arg[2:]...)...)
 	}
 
 	if output == "-" {
@@ -518,6 +524,41 @@ func withStderr(prefix string, err error, stderr string) error {
 	}
 
 	return fmt.Errorf("%s: %w: %s", prefix, err, stderr)
+}
+
+func runError(ctx context.Context, prefix string, err error, stderr string) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return withStderr(prefix+": ffmpeg command timed out", err, stderr)
+	}
+
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return withStderr(prefix+": ffmpeg command canceled", err, stderr)
+	}
+
+	return withStderr(prefix, err, stderr)
+}
+
+func isRTSP(input string) bool {
+	parsedURL, err := url.Parse(input)
+	if err != nil {
+		return strings.HasPrefix(strings.ToLower(input), "rtsp://") ||
+			strings.HasPrefix(strings.ToLower(input), "rtsps://")
+	}
+
+	return parsedURL.Scheme == "rtsp" || parsedURL.Scheme == "rtsps"
+}
+
+func captureTimeout(seconds int) time.Duration {
+	if seconds <= 0 {
+		return minCommandTimeout
+	}
+
+	const timeoutMultiplier = 6
+
+	timeout := time.Duration(seconds*timeoutMultiplier) * time.Second
+	timeout = max(timeout, minCommandTimeout)
+
+	return timeout
 }
 
 type cancelReadCloser struct {
