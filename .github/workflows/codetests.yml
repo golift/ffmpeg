@@ -21,7 +21,7 @@ jobs:
         with:
           go-version: stable
       - name: go-test
-        run: go test -race -covermode=atomic -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
+        run: go test -race -covermode=atomic -coverprofile=coverage ./... && go tool cover -func=coverage
 
   # Runs golangci-lint on macos against freebsd and macos.
   golangci-darwin:
