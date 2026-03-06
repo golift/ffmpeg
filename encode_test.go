@@ -189,7 +189,7 @@ func TestValues(t *testing.T) {
 
 // Example non-transcode direct-save from securityspy.
 func Example_securitySpy() { //nolint:testableexamples // it's an example.
-	securitypsy := "rtsp://user:pass@127.0.0.1:8000/++stream?cameraNum=1"
+	securitypsy := "rtsp://user:pass@127.0.0.1:8000/++stream?cameraNum=1" //nolint:gosec // it's an example.
 	output := "/tmp/securitypsy_captured_file.mov"
 	config := &Config{
 		FFMPEG: "/usr/local/bin/ffmpeg",
@@ -212,7 +212,7 @@ func Example_securitySpy() { //nolint:testableexamples // it's an example.
 
 // Example transcode from a Dahua IP camera.
 func Example_dahua() { //nolint:testableexamples // it's an example.
-	dahua := "rtsp://admin:password@192.168.1.12/live"
+	dahua := "rtsp://admin:password@192.168.1.12/live" //nolint:gosec // it's an example.
 	output := "/tmp/dahua_captured_file.m4v"
 	encode := Get(&Config{
 		Audio:  true, // retain audio stream

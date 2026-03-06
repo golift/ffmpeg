@@ -471,12 +471,22 @@ func (s *streamResult) Read(data []byte) (int, error) {
 
 func (s *streamResult) Close() error {
 	s.closeOnce.Do(func() {
-		s.cmdCancel()
-
 		_ = s.out.Close()
 
+		select {
+		case waitErr := <-s.done:
+			if waitErr != nil && !isIgnorableWaitErr(waitErr) {
+				s.closeErr = withStderr("run failed", waitErr, s.stderr.String())
+			}
+
+			return
+		default:
+		}
+
+		s.cmdCancel()
+
 		waitErr := <-s.done
-		if waitErr != nil && !errors.Is(waitErr, context.Canceled) {
+		if waitErr != nil && !isIgnorableWaitErr(waitErr) {
 			s.closeErr = withStderr("run failed", waitErr, s.stderr.String())
 		}
 	})
@@ -536,6 +546,15 @@ func runError(ctx context.Context, prefix string, err error, stderr string) erro
 	}
 
 	return withStderr(prefix, err, stderr)
+}
+
+func isIgnorableWaitErr(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return true
+	}
+
+	// Windows can report this when canceling a command that already exited.
+	return strings.Contains(err.Error(), "TerminateProcess: Access is denied")
 }
 
 func isRTSP(input string) bool {
