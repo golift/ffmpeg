@@ -16,7 +16,7 @@ jobs:
         os: [macos, windows, ubuntu]
     runs-on: ${{ matrix.os }}-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version: stable
@@ -36,7 +36,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: stable
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
@@ -54,7 +54,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: stable
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
