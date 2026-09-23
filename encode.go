@@ -190,7 +190,7 @@ func (e *Encoder) SetSize(size string) int64 {
 	return e.config.Size
 }
 
-// GetVideo retreives video from an input and returns an io.ReadCloser to consume the output.
+// GetVideo retrieves video from an input and returns an io.ReadCloser to consume the output.
 // Input must be an RTSP URL. Title is encoded into the video as the "movie title."
 // Returns command used for diagnostics, io.ReadCloser and error or nil.
 // This will automatically create a context timeout based on the requested capture length.
@@ -221,7 +221,7 @@ func (e *Encoder) GetVideo(input, title string) (string, io.ReadCloser, error) {
 	return cmdStr, &cancelReadCloser{ReadCloser: stream, cancel: cancel}, nil
 }
 
-// GetVideoContext retreives video from an input and returns an io.ReadCloser to consume the output.
+// GetVideoContext retrieves video from an input and returns an io.ReadCloser to consume the output.
 // Input must be an RTSP URL. Title is encoded into the video as the "movie title."
 // Returns command used for diagnostics, io.ReadCloser and error or nil.
 // Use the context to add a timeout value (max run duration) to the ffmpeg command.
