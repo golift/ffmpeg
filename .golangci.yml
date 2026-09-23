@@ -1,11 +1,12 @@
-version: '2'
+version: "2"
 linters:
   default: all
   disable:
-    - exhaustruct
-    - depguard
-    - wsl
-    - testpackage
+    - wsl # deprecated.
+    - exhaustruct # deprecated.
+    - exhaustruct_v5 # Config and the stream types leave sync and buffer fields at zero.
+    - gomodguard # deprecated.
+    - depguard # flags testify.
   settings:
     gocritic:
       enable-all: true
@@ -14,14 +15,6 @@ linters:
       settings:
         unnamedResult:
           checkExported: true
-    errcheck:
-      check-type-assertions: true
-      check-blank: false
-      disable-default-exclusions: false
-      exclude-functions:
-        - (*os.File).Close
-        - (io.Closer).Close
-
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
